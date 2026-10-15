@@ -95,17 +95,24 @@ class ShimOptions:
     not_found_value: int = 0
     """Status value returned when ``unresolved_policy`` is ``status``."""
 
-    resolve_base_name: bool = True
+    resolve_base_name: bool | None = None
     """Resolve the version-less base name (``cuMemAlloc``) rather than the
     declared symbol (``cuMemAlloc_v2``). Correct for ``get_proc_address``,
     which does its own version selection; wrong for plain ``dlsym``, where the
-    declared symbol is the one that exists."""
+    declared symbol is the one that exists.
+
+    ``None`` means "whichever the resolver needs", which is the only safe
+    default: a fixed one is wrong for one of the two resolvers, and wrong here
+    means the shim asks ``dlsym`` for a symbol the library does not export and
+    every call degrades to unresolved at runtime."""
 
     def __post_init__(self):
         if self.resolver not in Resolver.ALL:
             raise ValueError(
                 f"resolver must be one of {Resolver.ALL}, got {self.resolver!r}"
             )
+        if self.resolve_base_name is None:
+            self.resolve_base_name = self.resolver == Resolver.GET_PROC_ADDRESS
         if self.unresolved_policy not in UnresolvedPolicy.ALL:
             raise ValueError(
                 f"unresolved_policy must be one of {UnresolvedPolicy.ALL}, "
@@ -151,6 +158,14 @@ class TableGenOptions:
     cpp_class_prefix: str
     """TableGen record prefix, e.g. ``"Acme"`` -> ``Acme_AddOp``."""
 
+    summary: str = ""
+    """One-line dialect summary for the generated ``.td``. Defaults to a
+    derived string, which is fine for a scratch dialect and wrong for a real
+    one -- this is the name people read in generated documentation."""
+
+    description: str = ""
+    """Longer dialect description for the generated ``.td``."""
+
     handle_prefix: str = ""
     """Prefix stripped when naming minted handle types (``CUstream`` -> ``Stream``)."""
 
@@ -171,6 +186,11 @@ class TableGenOptions:
     point returns it, the op carries a trailing result of the dialect's result
     type."""
 
+    status_success: int = 0
+    """The status value meaning success. Read by the shim's versioned resolver,
+    which has to distinguish "the library answered" from "the library failed to
+    answer" before it decides whether to fall back to a raw ``dlsym``."""
+
     out_param_policy: str = OutParamPolicy.NONE
     """See :class:`OutParamPolicy`."""
 
@@ -184,8 +204,29 @@ class TableGenOptions:
     opaque_structs: list = field(default_factory=list)
     """Record names to keep as the opaque pointer type instead of modelling."""
 
+    symbols: list = field(default_factory=list)
+    """Explicit coverage list, matched against the version-less C symbol.
+
+    Deliberately not the exposed name: the list says which entry points of the
+    library are covered, which is a property of the library, so it must not
+    have to be rewritten when prefix removal or the dialect's naming changes.
+
+    Empty means "everything curation left", which is numbast's usual posture.
+    A library whose header declares far more than a dialect should mirror wants
+    the inverse -- state what is in, not what is out -- because the excluded set
+    is then the thing that grows silently as the header does."""
+
     shim: ShimOptions | None = None
     """Symbol-resolution layer. Required to emit a shim."""
+
+    cuda_header_mode: bool = True
+    """Parse with clang's implicit CUDA include injection disabled.
+
+    Defaults to the *opposite* of numbast's parse default, for the same reason
+    ``skip_non_device`` does: without it a CUDA driver header yields zero
+    declarations, because the declarations are attributed away from the header
+    that was asked for. An empty dialect is the failure mode, which looks like a
+    configuration problem rather than a parse-mode one."""
 
     skip_non_device: bool = False
     """Drop functions not marked ``__device__``.
@@ -235,7 +276,12 @@ def _shim_options_from_dict(config_dict: dict) -> ShimOptions | None:
         version=shim.get("Version"),
         unresolved_policy=shim.get("Unresolved Policy", UnresolvedPolicy.ABORT),
         not_found_value=shim.get("Not Found Value", 0),
-        resolve_base_name=bool(shim.get("Resolve Base Name", True)),
+        # Absent means "let the resolver decide"; only an explicit key overrides.
+        resolve_base_name=(
+            bool(shim["Resolve Base Name"])
+            if "Resolve Base Name" in shim
+            else None
+        ),
     )
 
 
@@ -270,19 +316,24 @@ def _tablegen_options_from_dict(config_dict: dict) -> TableGenOptions:
     return TableGenOptions(
         dialect_name=config_dict["Dialect Name"],
         cpp_class_prefix=config_dict["Cpp Class Prefix"],
+        summary=config_dict.get("Summary", "") or "",
+        description=config_dict.get("Description", "") or "",
         handle_prefix=config_dict.get("Handle Prefix", "") or "",
         struct_prefixes=config_dict.get("Struct Prefixes", []) or [],
         strip_version_suffixes=bool(
             config_dict.get("Strip Version Suffixes", False)
         ),
         status_type=status.get("Type"),
+        status_success=status.get("Success", 0),
         out_param_policy=config_dict.get(
             "Out Param Policy", OutParamPolicy.NONE
         ),
         shim_prefix=config_dict.get("Shim Prefix", "_"),
         mnemonic_overrides=config_dict.get("Mnemonic Overrides", {}) or {},
         opaque_structs=config_dict.get("Opaque Structs", []) or [],
+        symbols=config_dict.get("Symbols", []) or [],
         shim=_shim_options_from_dict(config_dict),
+        cuda_header_mode=bool(config_dict.get("Cuda Header Mode", True)),
         skip_non_device=bool(config_dict.get("Skip Non Device", False)),
         runtime_package=config_dict.get("Runtime Package", "") or "",
         stream_effects=_stream_effects_from_dict(config_dict),

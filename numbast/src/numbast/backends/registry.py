@@ -34,8 +34,9 @@ three backends says a name must identify exactly one.
 __all__ = [
     "BACKEND_CONFIG_KEY",
     "CUDA_OXIDE",
-    "NUMBA_CUDA_MLIR",
+    "MLIR_DIALECT",
     "NUMBA_CUDA",
+    "NUMBA_CUDA_MLIR",
     "BackendNotFoundError",
     "BackendNotRunnableError",
     "MultipleBackendsError",
@@ -50,6 +51,7 @@ BACKEND_CONFIG_KEY = "Backend"
 NUMBA_CUDA = "numba-cuda"
 NUMBA_CUDA_MLIR = "numba-cuda-mlir"
 CUDA_OXIDE = "cuda-oxide"
+MLIR_DIALECT = "mlir-dialect"
 
 #: Each registered backend, mapped to the module whose
 #: ``static_binding_generator`` command drives it, or ``None`` for a backend
@@ -64,6 +66,11 @@ _BACKENDS: dict[str, str | None] = {
     NUMBA_CUDA: "numbast.tools.static_binding_generator",
     NUMBA_CUDA_MLIR: "numbast.experimental.mlir.tools.static_binding_generator",
     CUDA_OXIDE: None,
+    # The two MLIR names are not alternatives: `numba-cuda-mlir` emits Numba
+    # typing and lowering registries that call into an MLIR runtime, while
+    # `mlir-dialect` emits the dialect itself. Naming either one `mlir` would
+    # describe both, which is why neither is called that.
+    MLIR_DIALECT: "numbast.backends.tablegen.backend",
 }
 
 DEFAULT_BACKEND = NUMBA_CUDA

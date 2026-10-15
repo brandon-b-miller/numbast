@@ -9,6 +9,7 @@ from numbast.backends.registry import (
     CUDA_OXIDE,
     NUMBA_CUDA,
     NUMBA_CUDA_MLIR,
+    MLIR_DIALECT,
     BackendNotFoundError,
     BackendNotRunnableError,
     MultipleBackendsError,
@@ -93,7 +94,7 @@ def test_the_error_names_the_backends_that_do_exist():
 
 def test_available_backends_is_sorted_and_complete():
     assert available_backends() == sorted(
-        [NUMBA_CUDA, NUMBA_CUDA_MLIR, CUDA_OXIDE]
+        [NUMBA_CUDA, NUMBA_CUDA_MLIR, CUDA_OXIDE, MLIR_DIALECT]
     )
 
 
@@ -112,7 +113,9 @@ def test_a_runnable_backend_names_its_driver(name):
 
 
 def test_runnable_backends_excludes_the_driverless_one():
-    assert runnable_backends() == sorted([NUMBA_CUDA, NUMBA_CUDA_MLIR])
+    assert runnable_backends() == sorted(
+        [NUMBA_CUDA, NUMBA_CUDA_MLIR, MLIR_DIALECT]
+    )
     assert CUDA_OXIDE in available_backends()
 
 
@@ -133,4 +136,4 @@ def test_a_registered_backend_without_a_driver_says_so():
 
 def test_an_unknown_name_has_no_driver_either():
     with pytest.raises(BackendNotFoundError):
-        generator_module("tablegen")
+        generator_module("nosuchbackend")
